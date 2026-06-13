@@ -9,6 +9,7 @@ CHROMA_DB_DIR = os.path.join(BASE_DIR, "data", "chroma_db")
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 COHERE_MODEL_NAME = "command-a-03-2025"
 TEMPERATURE = 0.0
 
