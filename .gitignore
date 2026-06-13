@@ -1,0 +1,25 @@
+# Secrets and local environment
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+pyvenv.cfg
+
+# Generated data and vector store
+data/raw/
+data/chroma_db/
+
+# Logs and editor files
+*.log
+.DS_Store
+.vscode/
