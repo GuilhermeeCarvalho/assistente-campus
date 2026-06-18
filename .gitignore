@@ -18,6 +18,7 @@ pyvenv.cfg
 # Generated data and vector store
 data/raw/
 data/chroma_db/
+data/urls.txt
 
 # Logs and editor files
 *.log

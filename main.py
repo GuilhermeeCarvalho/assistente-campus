@@ -23,11 +23,11 @@ def main():
         print("\n📚 Fontes Utilizadas:")
         fontes_citadas = set()
         for doc in resposta["context"]:
-            # Extrai o nome do arquivo dos metadados
             nome_arquivo = doc.metadata.get('source', 'Documento desconhecido')
-            # Limpa o caminho completo para mostrar apenas o nome do arquivo
-            nome_breve = nome_arquivo.split("\\")[-1].split("/")[-1]
-            fontes_citadas.add(nome_breve)
+            if isinstance(nome_arquivo, str) and nome_arquivo.startswith(("http://", "https://")):
+                fontes_citadas.add(nome_arquivo)
+            else:
+                fontes_citadas.add(nome_arquivo.split("\\")[-1].split("/")[-1])
             
         for fonte in fontes_citadas:
             print(f"- {fonte}")
