@@ -17,14 +17,12 @@ from src import config
 
 SUPPORTED_EXTENSIONS = {".pdf", ".txt", ".docx", ".csv", ".xlsx", ".url"}
 
-# Tags HTML que representam conteúdo principal — ignorar o resto reduz ruído
 _TAGS_CONTEUDO = [
     "article", "main", "section", "div", "p",
     "h1", "h2", "h3", "h4", "h5", "h6",
     "li", "td", "th", "blockquote",
 ]
 
-# Tags que nunca contêm conteúdo útil
 _TAGS_RUIDO = [
     "script", "style", "noscript", "header", "footer",
     "nav", "aside", "form", "button", "svg", "img",
@@ -33,7 +31,7 @@ _TAGS_RUIDO = [
 
 
 def _extrair_texto_txt(caminho_arquivo: str) -> Document:
-    with open(caminho_arquivo, "r", encoding="utf-8") as arquivo:
+    with open(caminho_arquivo, "r", encoding="utf-8", errors="replace") as arquivo:
         conteudo = arquivo.read().strip()
 
     return Document(page_content=conteudo, metadata={"source": caminho_arquivo, "type": "txt"})
@@ -49,7 +47,7 @@ def _extrair_texto_docx(caminho_arquivo: str) -> Document:
 
 def _extrair_texto_csv(caminho_arquivo: str) -> Document:
     linhas_formatadas = []
-    with open(caminho_arquivo, "r", encoding="utf-8-sig", newline="") as arquivo:
+    with open(caminho_arquivo, "r", encoding="utf-8-sig", errors="replace", newline="") as arquivo:
         leitor = csv.reader(arquivo)
         for linha in leitor:
             if any(celula.strip() for celula in linha):
@@ -60,15 +58,6 @@ def _extrair_texto_csv(caminho_arquivo: str) -> Document:
 
 
 def _extrair_texto_xlsx(caminho_arquivo: str) -> list[Document]:
-    """
-    Extrai texto de um arquivo XLSX gerando Documents auto-contidos.
-
-    Quando a planilha usa agrupamento na primeira coluna (ex.: dia da semana
-    aparece só na primeira linha do grupo e as linhas seguintes têm a célula
-    vazia), cada grupo vira um Document separado com título, cabeçalho e nome
-    do grupo repetidos.  Isso garante que o text splitter nunca gere um chunk
-    sem contexto.
-    """
     workbook = load_workbook(caminho_arquivo, data_only=True)
     documentos = []
 
@@ -82,12 +71,10 @@ def _extrair_texto_xlsx(caminho_arquivo: str) -> list[Document]:
         if not linhas_brutas:
             continue
 
-        # Separar cabeçalho (primeira linha com dados) do corpo
         cabecalho = linhas_brutas[0]
         corpo = linhas_brutas[1:]
 
         if not corpo:
-            # Planilha só com cabeçalho — gerar Document simples
             conteudo = f"Planilha: {aba.title}\n" + " | ".join(cabecalho)
             documentos.append(
                 Document(
@@ -97,7 +84,6 @@ def _extrair_texto_xlsx(caminho_arquivo: str) -> list[Document]:
             )
             continue
 
-        # Detectar se a primeira coluna usa agrupamento (muitas células vazias)
         primeira_col_vazia = sum(1 for linha in corpo if not linha[0])
         usa_agrupamento = len(corpo) > 2 and primeira_col_vazia > len(corpo) * 0.3
 
@@ -106,7 +92,6 @@ def _extrair_texto_xlsx(caminho_arquivo: str) -> list[Document]:
                 _gerar_docs_agrupados(caminho_arquivo, aba.title, cabecalho, corpo)
             )
         else:
-            # Sem agrupamento — comportamento original (um Document por aba)
             linhas_formatadas = [" | ".join(cabecalho)]
             linhas_formatadas.extend(" | ".join(vals) for vals in corpo)
             conteudo = f"Planilha: {aba.title}\n" + "\n".join(linhas_formatadas)
@@ -126,11 +111,6 @@ def _gerar_docs_agrupados(
     cabecalho: list[str],
     corpo: list[list[str]],
 ) -> list[Document]:
-    """
-    Agrupa as linhas pela primeira coluna e gera um Document por grupo.
-    Em cada Document o nome do grupo é preenchido em todas as linhas e o
-    cabeçalho é repetido, garantindo contexto completo para o retriever.
-    """
     from collections import OrderedDict
 
     grupos: OrderedDict[str, list[list[str]]] = OrderedDict()
@@ -143,7 +123,6 @@ def _gerar_docs_agrupados(
             continue
         if grupo_atual not in grupos:
             grupos[grupo_atual] = []
-        # Preencher a célula vazia com o nome do grupo para contexto
         valores_completos = valores.copy()
         if not valores_completos[0]:
             valores_completos[0] = grupo_atual
@@ -176,10 +155,6 @@ def _gerar_docs_agrupados(
 
 
 def _extrair_texto_url(url: str) -> Document:
-    """
-    Extrai o conteúdo textual de uma URL removendo agressivamente elementos
-    de navegação, rodapés e scripts para reduzir ruído no embedding.
-    """
     resposta = requests.get(
         url,
         timeout=30,
@@ -190,22 +165,17 @@ def _extrair_texto_url(url: str) -> Document:
 
     sopa = BeautifulSoup(resposta.text, "html.parser")
 
-    # 1. Remover todas as tags de ruído antes de qualquer extração
     for tag in sopa(_TAGS_RUIDO):
         tag.decompose()
 
-    # 2. Tentar extrair apenas o conteúdo principal (article ou main)
     corpo_principal = sopa.find("article") or sopa.find("main") or sopa.find("body") or sopa
 
-    # 3. Extrair texto dos elementos de conteúdo com separador de linha
     blocos = []
     for elemento in corpo_principal.find_all(_TAGS_CONTEUDO):
         texto = elemento.get_text(" ", strip=True)
-        # Ignorar blocos muito curtos (menus, rótulos soltos, etc.)
         if len(texto) > 15:
             blocos.append(texto)
 
-    # Deduplicar blocos preservando a ordem (parágrafos repetidos por herança do DOM)
     vistos: set[str] = set()
     blocos_unicos = []
     for bloco in blocos:
@@ -217,10 +187,9 @@ def _extrair_texto_url(url: str) -> Document:
 
     titulo = sopa.title.string.strip() if sopa.title and sopa.title.string else url
 
-    # Prefixar com título e URL para facilitar a citação pelo agente
     conteudo_final = f"Título: {titulo}\nURL: {url}\n\n{conteudo}" if conteudo else f"Título: {titulo}\nURL: {url}"
 
-    print(f"   🌐 URL '{url}' → {len(conteudo_final)} caracteres extraídos")
+    print(f"   URL '{url}' → {len(conteudo_final)} caracteres extraídos")
 
     return Document(
         page_content=conteudo_final,
@@ -238,7 +207,7 @@ def _carregar_urls_em_arquivo(caminho_arquivo: str) -> list[Document]:
             try:
                 documentos.append(_extrair_texto_url(url))
             except Exception as erro:
-                print(f"⚠️ Falha ao carregar URL '{url}': {erro}")
+                print(f"Falha ao carregar URL '{url}': {erro}")
     return documentos
 
 
@@ -277,58 +246,54 @@ def _coletar_documentos() -> list[Document]:
                     try:
                         documentos.extend(_carregar_documentos_local(caminho_arquivo))
                     except Exception as erro:
-                        print(f"⚠️ Ignorando '{caminho_arquivo}': {erro}")
+                        print(f"Ignorando '{caminho_arquivo}': {erro}")
 
     if os.path.exists(config.DATA_URLS_FILE):
         try:
             documentos.extend(_carregar_urls_em_arquivo(config.DATA_URLS_FILE))
         except Exception as erro:
-            print(f"⚠️ Ignorando URLs em '{config.DATA_URLS_FILE}': {erro}")
+            print(f"Ignorando URLs em '{config.DATA_URLS_FILE}': {erro}")
 
     return documentos
 
 
 def executar_ingestao():
-    print("🔄 Iniciando o processo de ingestão de documentos...")
+    print("Iniciando o processo de ingestão de documentos...")
 
     if not os.path.exists(config.DATA_RAW_DIR) and not os.path.exists(config.DATA_URLS_FILE):
-        print(f"❌ Erro: Nenhuma fonte encontrada em '{config.DATA_RAW_DIR}' ou '{config.DATA_URLS_FILE}'.")
+        print(f"Erro: Nenhuma fonte encontrada em '{config.DATA_RAW_DIR}' ou '{config.DATA_URLS_FILE}'.")
         return
 
-    print("📂 Lendo fontes suportadas em data/raw/ e urls.txt...")
+    print("Lendo fontes suportadas em data/raw/ e urls.txt...")
     documentos = _coletar_documentos()
     if not documentos:
-        print("❌ Erro: Nenhum documento suportado foi encontrado para ingestão.")
+        print("Erro: Nenhum documento suportado foi encontrado para ingestão.")
         return
 
-    print(f"📄 Total de documentos carregados: {len(documentos)}")
+    print(f"Total de documentos carregados: {len(documentos)}")
 
-    # Chunks menores para URLs garantem granularidade na busca;
-    # overlap maior preserva contexto entre parágrafos fragmentados.
-    print("✂️ Dividindo os documentos em blocos de texto (chunks)...")
+    print("Dividindo os documentos em blocos de texto (chunks)...")
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=config.CHUNK_SIZE,
         chunk_overlap=config.CHUNK_OVERLAP,
         add_start_index=True,
-        # Separadores em português para quebrar no ponto certo
         separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
     )
     chunks = text_splitter.split_documents(documentos)
-    print(f"🧩 Total de chunks gerados: {len(chunks)}")
+    print(f"Total de chunks gerados: {len(chunks)}")
 
-    # Modelo multilíngue — funciona bem com português
-    print("🧠 Gerando embeddings (modelo multilíngue)...")
+    print("Gerando embeddings (modelo multilíngue)...")
     embeddings = HuggingFaceEmbeddings(model_name=config.EMBEDDING_MODEL_NAME)
 
     if os.path.exists(config.CHROMA_DB_DIR):
         try:
-            print(f"🧹 Limpando coleção anterior em: {config.CHROMA_DB_DIR}")
+            print(f"Limpando coleção anterior em: {config.CHROMA_DB_DIR}")
             Chroma(
                 persist_directory=config.CHROMA_DB_DIR,
                 embedding_function=embeddings,
             ).delete_collection()
         except Exception as erro:
-            print(f"⚠️ Não foi possível limpar a coleção anterior: {erro}")
+            print(f"Não foi possível limpar a coleção anterior: {erro}")
 
     vector_store = Chroma.from_documents(
         documents=chunks,
@@ -336,7 +301,7 @@ def executar_ingestao():
         persist_directory=config.CHROMA_DB_DIR,
     )
 
-    print(f"✅ Ingestão concluída com sucesso! Banco salvo em: {config.CHROMA_DB_DIR}")
+    print(f"Ingestão concluída com sucesso! Banco salvo em: {config.CHROMA_DB_DIR}")
 
 
 if __name__ == "__main__":

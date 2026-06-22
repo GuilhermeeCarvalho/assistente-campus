@@ -12,37 +12,25 @@ except ImportError:
 
 from src import config
 
-
 def inicializar_agente():
-    # 1. Mesmo modelo de embedding usado na ingestão (multilíngue)
     embeddings = HuggingFaceEmbeddings(model_name=config.EMBEDDING_MODEL_NAME)
 
-    # 2. Conectar ao banco de dados Chroma existente
     vector_store = Chroma(
         persist_directory=config.CHROMA_DB_DIR,
         embedding_function=embeddings,
     )
 
-    # 3. Retriever com MMR (Maximal Marginal Relevance)
-    #    - fetch_k: quantos candidatos buscar antes de filtrar
-    #    - k: quantos retornar ao LLM após diversificação
-    #    - lambda_mult: 0.7 = 70% relevância + 30% diversidade
-    #
-    #    MMR evita que todos os chunks recuperados sejam do mesmo trecho,
-    #    aumentando a cobertura quando a resposta está espalhada na página.
     retriever = vector_store.as_retriever(
         search_type="mmr",
         search_kwargs={
-            "k": 6,          # chunks enviados ao LLM (era 3 — dobrado)
-            "fetch_k": 20,   # pool de candidatos antes do filtro de diversidade
+            "k": 6,
+            "fetch_k": 20,
             "lambda_mult": 0.7,
         },
     )
 
-    # 4. LLM da Cohere
     llm = ChatCohere(model=config.COHERE_MODEL_NAME, temperature=config.TEMPERATURE)
 
-    # 5. Prompt com instruções claras sobre como citar PDFs e URLs
     system_prompt = (
         "Você é o Assistente Inteligente do Campus. Sua função é responder dúvidas dos alunos "
         "com base exclusivamente nas fontes oficiais fornecidas no contexto abaixo.\n\n"
@@ -67,7 +55,6 @@ def inicializar_agente():
         ("human", "{input}"),
     ])
 
-    # 6. Montar a chain
     combine_docs_chain = create_stuff_documents_chain(llm, prompt)
     rag_chain = create_retrieval_chain(retriever, combine_docs_chain)
 
